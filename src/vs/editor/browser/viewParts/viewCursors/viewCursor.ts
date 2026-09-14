@@ -48,6 +48,7 @@ export class ViewCursor {
 	private _cursorStyle: TextEditorCursorStyle;
 	private _lineCursorWidth: number;
 	private _lineCursorHeight: number;
+	private _useMonospaceOptimizations: boolean;
 	private _typicalHalfwidthCharacterWidth: number;
 
 	private _isVisible: boolean;
@@ -64,6 +65,7 @@ export class ViewCursor {
 		const fontInfo = options.get(EditorOption.fontInfo);
 
 		this._cursorStyle = options.get(EditorOption.effectiveCursorStyle);
+		this._useMonospaceOptimizations = fontInfo.isMonospace && !options.get(EditorOption.disableMonospaceOptimizations);
 		this._typicalHalfwidthCharacterWidth = fontInfo.typicalHalfwidthCharacterWidth;
 		this._lineCursorWidth = Math.min(options.get(EditorOption.cursorWidth), this._typicalHalfwidthCharacterWidth);
 		this._lineCursorHeight = options.get(EditorOption.cursorHeight);
@@ -131,6 +133,7 @@ export class ViewCursor {
 		const fontInfo = options.get(EditorOption.fontInfo);
 
 		this._cursorStyle = options.get(EditorOption.effectiveCursorStyle);
+		this._useMonospaceOptimizations = fontInfo.isMonospace && !options.get(EditorOption.disableMonospaceOptimizations);
 		this._typicalHalfwidthCharacterWidth = fontInfo.typicalHalfwidthCharacterWidth;
 		this._lineCursorWidth = Math.min(options.get(EditorOption.cursorWidth), this._typicalHalfwidthCharacterWidth);
 		this._lineCursorHeight = options.get(EditorOption.cursorHeight);
@@ -216,13 +219,11 @@ export class ViewCursor {
 		}
 
 		const range = firstVisibleRangeForCharacter.ranges[0];
-		const width = (
-			nextGrapheme === '\t'
-				? this._typicalHalfwidthCharacterWidth
-				: (range.width < 1
-					? this._typicalHalfwidthCharacterWidth
-					: range.width)
-		);
+		const isPrintableBasicASCII = nextGrapheme.length === 1 && nextGrapheme.charCodeAt(0) >= 0x20 && nextGrapheme.charCodeAt(0) <= 0x7E;
+		const useTypicalWidth = nextGrapheme === '\t'
+			|| range.width < 1
+			|| (this._useMonospaceOptimizations && isPrintableBasicASCII && !ctx.viewportData.getViewLineRenderingData(position.lineNumber).hasVariableFonts);
+		const width = useTypicalWidth ? this._typicalHalfwidthCharacterWidth : range.width;
 
 		if (this._cursorStyle === TextEditorCursorStyle.Block) {
 			textContent = nextGrapheme;

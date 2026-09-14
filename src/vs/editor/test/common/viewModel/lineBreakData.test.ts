@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { PositionAffinity } from '../../../common/model.js';
+import { InjectedTextCursorStops, PositionAffinity } from '../../../common/model.js';
 import { ModelDecorationInjectedTextOptions } from '../../../common/model/textModel.js';
 import { ModelLineProjectionData } from '../../../common/modelLineProjectionData.js';
 
@@ -18,6 +18,95 @@ suite('Editor ViewModel - LineBreakData', () => {
 
 		assert.strictEqual(data.translateToInputOffset(0, 50), 50);
 		assert.strictEqual(data.translateToInputOffset(1, 60), 150);
+	});
+
+	suite('Injected text cursor stops', () => {
+		const { Both, Left, Right, None } = InjectedTextCursorStops;
+		const content = 'hint';
+
+		function createData(cursorStops: InjectedTextCursorStops[]): ModelLineProjectionData {
+			return new ModelLineProjectionData(
+				cursorStops.map(() => 2),
+				cursorStops.map(cursorStops => ModelDecorationInjectedTextOptions.from({ content, cursorStops })),
+				[100], [], 0
+			);
+		}
+
+		for (const { name, cursorStops, expectedOffset } of [
+			{ name: 'right stop', cursorStops: [Right], expectedOffset: 6 },
+			{ name: 'left stop', cursorStops: [Left], expectedOffset: 2 },
+			{ name: 'no stops', cursorStops: [None], expectedOffset: 2 },
+			{ name: 'adjacent right stop', cursorStops: [None, Right], expectedOffset: 10 },
+			{ name: 'adjacent left stop', cursorStops: [None, Left], expectedOffset: 6 },
+			{ name: 'preceding right stop', cursorStops: [Right, None], expectedOffset: 6 },
+			{ name: 'no adjacent stops', cursorStops: [None, None], expectedOffset: 2 },
+		]) {
+			test(name, () => {
+				const data = createData(cursorStops);
+				const offsets = sequence(cursorStops.length * content.length + 1, 2);
+				const expectedPosition = `0:${expectedOffset}`;
+
+				assert.deepStrictEqual({
+					translated: data.translateToOutputPosition(2).toString(),
+					normalized: offsets.map(offset => data.normalizeOutputPosition(0, offset, PositionAffinity.None).toString()),
+				}, {
+					translated: expectedPosition,
+					normalized: offsets.map(() => expectedPosition),
+				});
+			});
+		}
+
+		test('preserves both edges when both cursor stops are allowed', () => {
+			const data = createData([Both]);
+			assert.deepStrictEqual({
+				translated: data.translateToOutputPosition(2).toString(),
+				leftEdge: data.normalizeOutputPosition(0, 2, PositionAffinity.None).toString(),
+				interior: data.normalizeOutputPosition(0, 3, PositionAffinity.None).toString(),
+				rightEdge: data.normalizeOutputPosition(0, 6, PositionAffinity.None).toString(),
+			}, {
+				translated: '0:2',
+				leftEdge: '0:2',
+				interior: '0:2',
+				rightEdge: '0:6',
+			});
+		});
+
+		test('explicit affinity selects the outer edges of adjacent injected text', () => {
+			const data = createData([None, Right]);
+			assert.deepStrictEqual({
+				left: data.translateToOutputPosition(2, PositionAffinity.Left).toString(),
+				right: data.translateToOutputPosition(2, PositionAffinity.Right).toString(),
+				leftOfInjectedText: data.translateToOutputPosition(2, PositionAffinity.LeftOfInjectedText).toString(),
+				rightOfInjectedText: data.translateToOutputPosition(2, PositionAffinity.RightOfInjectedText).toString(),
+			}, {
+				left: '0:2',
+				right: '0:10',
+				leftOfInjectedText: '0:2',
+				rightOfInjectedText: '0:10',
+			});
+		});
+
+		test('does not search for cursor stops at other input offsets', () => {
+			const data = new ModelLineProjectionData(
+				[0, 2, 4],
+				[
+					ModelDecorationInjectedTextOptions.from({ content: 'x' }),
+					ModelDecorationInjectedTextOptions.from({ content: 'hint', cursorStops: None }),
+					ModelDecorationInjectedTextOptions.from({ content: 'tail', cursorStops: Right }),
+				],
+				[100],
+				[],
+				0
+			);
+
+			assert.deepStrictEqual({
+				translated: data.translateToOutputPosition(2, PositionAffinity.None).toString(),
+				normalized: data.normalizeOutputPosition(0, 7, PositionAffinity.None).toString(),
+			}, {
+				translated: '0:3',
+				normalized: '0:3',
+			});
+		});
 	});
 
 	function sequence(length: number, start = 0): number[] {
